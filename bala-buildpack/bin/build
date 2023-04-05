@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+
+echo "---> Ballerina buildpack"
+
+# 1. GET ARGS
+layers_dir="$1"
+env_dir="$2/env"
+plan_path="$3"
+
+
+# 2. LOAD USER-PROVIDED BUILD-TIME ENVIRONMENT VARIABLES
+if compgen -G "${env_dir}/*" > /dev/null; then
+ for var in ${env_dir}/*; do
+   declare "$(basename ${var})=$(<${var})"
+ done
+fi
+
+# Loop through each file in the current directory with the .bala extension
+for file in ./*.bala; do
+
+  # Save the file name into a variable
+  bala_file="$file"
+
+done
+
+echo "The file name of the .bala file is: $bala_file"
+unzip "$bala_file" -d ./bala
+
+echo "---> detecting ballerina version"
+
+# Read the value of 'ballerina_version' from the JSON file
+ballerina_version=$(jq -r '.ballerina_version' bala/package.json)
+
+# Remove the pre-release tag from the version
+ballerina_version=$(echo "$ballerina_version" | sed 's/-.*//')
+
+# Print the version
+echo "Compiled Ballerina Version $ballerina_version"
+
+ballerina_url=https://dist.ballerina.io/downloads/${ballerina_version}/ballerina-${ballerina_version}-swan-lake.zip
+
+echo "---> Installing Ballerina : "${ballerina_version}
+
+
+# 4. MAKE BALLERINA CACHE LAYER
+ballerina_layer_dir=${layers_dir}/ballerina
+if [[ -f ${ballerina_layer_dir}.toml ]]; then
+ cached_ballerina_url=$(cat "${ballerina_layer_dir}.toml" | yj -t | jq -r .metadata.url 2>/dev/null || echo 'Ballerina TOML parsing failed')
+fi
+if [[ ${ballerina_url} != ${cached_ballerina_url} ]] ; then
+ rm -rf "$layers_dir"/ballerina
+ rm -rf ${ballerina_layer_dir}.toml
+ mkdir -p "$layers_dir"/ballerina/env
+ # wget -q -O - "$ballerina_url" | tar pxz -C "${ballerina_layer_dir}" --strip-components=1
+ wget "${ballerina_url}"
+ unzip ballerina-${ballerina_version}-swan-lake.zip
+ cp -r ballerina-${ballerina_version}-swan-lake/* $ballerina_layer_dir/
+
+
+ cat > "${ballerina_layer_dir}.toml" << EOF
+launch = true
+build = true
+cache = true
+
+
+[metadata]
+version = "${ballerina_version}"
+url = "${ballerina_url}"
+EOF
+
+ echo "$layers_dir"/ballerina > "$layers_dir"/ballerina/env/BALLERINA_HOME
+if [[ -f ${ballerina_layer_dir}.toml ]]; then
+ cached_ballerina_url=$(cat "${ballerina_layer_dir}.toml" | yj -t | jq -r .metadata.url 2>/dev/null || echo 'Ballerina TOML parsing failed')
+fi
+
+ mkdir -p ${ballerina_layer_dir}/profile.d
+ cat > "${ballerina_layer_dir}/profile.d/ballerina.sh" << EOF
+export BALLERINA_HOME=${ballerina_layer_dir}
+EOF
+fi
+
+
+export BALLERINA_HOME=${ballerina_layer_dir}
+export PATH=${ballerina_layer_dir}/bin:$PATH
+
+
+# 3. INSTALL JAVA
+jdk_url="https://cdn.azul.com/zulu/bin/zulu11.62.17-ca-jdk11.0.18-linux_x64.tar.gz"
+# jdk_url="https://cdn.azul.com/zulu/bin/zulu17.40.19-ca-jdk17.0.6-linux_x64.tar.gz"
+jdk_version="11.0.18"
+
+
+if [[ -r /etc/alpine-release ]]; then
+ jdk_url="https://cdn.azul.com/zulu/bin/zulu11.62.17-ca-jdk11.0.18-linux_musl_x64.tar.gz"
+ jdk_version="1.8.0_222"
+fi
+
+
+echo "---> Installing JDK"
+
+# If it doesn't exist locally, create a JDK cache layer
+# This makes JDK available to subsequent buildpacks as well
+jdk_layer_dir=${layers_dir}/jdk
+if [[ -f ${jdk_layer_dir}.toml ]]; then
+ cached_jdk_url=$(cat "${jdk_layer_dir}.toml" | yj -t | jq -r .metadata.url 2>/dev/null || echo 'JDK TOML parsing failed')
+fi
+
+
+if [[ ${jdk_url} != ${cached_jdk_url} ]] ; then
+ rm -rf "$layers_dir"/jdk
+ mkdir -p "$layers_dir"/jdk/env
+ wget -q -O - "$jdk_url" | tar pxz -C "${jdk_layer_dir}" --strip-components=1
+
+
+ cat > "${jdk_layer_dir}.toml" << EOF
+launch = true
+build = true
+cache = true
+
+
+[metadata]
+version = "${jdk_version}"
+url = "${jdk_url}"
+EOF
+
+
+ echo "$layers_dir"/jdk > "$layers_dir"/jdk/env/JAVA_HOME
+ if [[ -z ${LD_LIBRARY_PATH} ]]; then
+   echo "${JAVA_HOME}/jre/lib/amd64/server" > ${jdk_layer_dir}/env/LD_LIBRARY_PATH
+ else
+   echo "${JAVA_HOME}/jre/lib/amd64/server:${LD_LIBRARY_PATH}" > ${jdk_layer_dir}/env/LD_LIBRARY_PATH
+ fi
+
+
+ mkdir -p ${jdk_layer_dir}/profile.d
+ cat > "${jdk_layer_dir}/profile.d/jdk.sh" << EOF
+export JAVA_HOME=${jdk_layer_dir}
+if [[ -z \$LD_LIBRARY_PATH ]]; then
+ export LD_LIBRARY_PATH="\$JAVA_HOME/jre/lib/amd64/server"
+else
+ export LD_LIBRARY_PATH="\$JAVA_HOME/jre/lib/amd64/server:${LD_LIBRARY_PATH}"
+fi
+EOF
+fi
+
+
+# Set env variables to make jdk accessible
+for var in "$layers_dir"/jdk/env/*; do
+ declare "$(basename "$var")=$(<"$var")"
+done
+export JAVA_HOME=${jdk_layer_dir}
+export PATH=${jdk_layer_dir}/bin:$PATH
+
+
+# for var in "$layers_dir"/ballerina/env/*; do
+#  declare "$(basename "$var")=$(<"$var")"
+# done
+
+echo "BALLERINA COMPILING VERSION"
+bal -v
+
+
+# #build
+# bal build 
+
+# 6. SET DEFAULT START COMMAND
+ cat >> "${layers_dir}/launch.toml" <<EOL
+[[processes]]
+type = "web"
+default = true
+command = 'bal doc ${bala_file}'
+EOL

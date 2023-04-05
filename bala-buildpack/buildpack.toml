@@ -1,0 +1,15 @@
+# Buildpack API version
+api = "0.2"
+
+# Buildpack ID and metadata
+[buildpack]
+id = "samples/ballerina"
+version = "0.0.1"
+name = "Sample Ballerina Buildpack"
+
+# Stacks that the buildpack will work with
+[[stacks]]
+id = "io.buildpacks.choreo.stacks.bionic"
+
+[[stacks]]
+id = "*"

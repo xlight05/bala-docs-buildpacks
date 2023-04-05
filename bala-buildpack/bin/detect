@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+# Check if there is no file with .bala extension
+if ! [[ $(ls *.bala 2>/dev/null) ]]; then
+  exit 100
+fi

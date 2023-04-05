@@ -1,0 +1,18 @@
+# Buildpacks to include in builder
+[[buildpacks]]
+id = "samples/ballerina"
+version = "0.0.1"
+uri = "../bala-buildpack"
+
+# Order used for detection
+[[order]]
+[[order.group]]
+id = "samples/ballerina"
+version = "0.0.1"
+
+
+# Stack that will be used by the builder
+[stack]
+id = "io.buildpacks.choreo.stacks.bionic"
+run-image = "xlight05/stack-run:latest"
+build-image = "xlight05/stack-build:latest"
